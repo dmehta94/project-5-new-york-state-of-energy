@@ -1,5 +1,3 @@
-<img src="http://imgur.com/1ZcRyrc.png" style="float: left; margin: 20px; height: 90px">
-
 # Project 5: New York State of Energy - Renewable Energy by 2030
 
 *Team: Muhammad Haseeb Anjum, Graham Haun, Melissa Marshall, Deval Mehta, Damar Shipp*
