@@ -1,21 +1,35 @@
-import numpy as np
-import pandas as pd
-from retry_requests import retry
-import openmeteo_requests
-import requests_cache
+"""
+Weather Data Collection Script
+================================
+Collects 20 years of daily weather data (2005-2024) for 166 coordinate points
+across New York State from the Open-Meteo Archive API.
+
+Outputs:
+    ../data/new-york-weather.csv      — Appended daily weather records
+    ../data/failed_coordinates.csv    — Coordinates that failed after all retries
+
+Run this script once before executing Analysis.ipynb. The output CSV is large;
+collection takes several hours due to API rate limiting.
+"""
+
+import os
 import time
 import random
-import os
+
+import pandas as pd
+import openmeteo_requests
+import requests_cache
+from retry_requests import retry
 
 
-# Setup cached session with retry functionality
-cache_session = requests_cache.CachedSession('.cache', expire_after=3600)
-retry = Retry(total=5, backoff_factor=0.2)
-retry_session = requests_cache.CachedSession('.cache', expire_after=3600)
-openmeteo = openmeteo_requests.Client(session=retry_session)
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
 
-# List of coordinates (latitude, longitude)
-coordinates = [
+# 166 representative coordinate points (latitude, longitude) covering all
+# 62 counties of New York State. Three points per county where possible:
+# county centroid plus two secondary points for spatial resolution.
+COORDINATES: list[tuple[float, float]] = [
     (42.6, -73.97), (42.5273, -73.908), (42.6632, -73.8903),
     (42.25, -78.02), (42.3408, -77.9462), (42.1825, -77.966),
     (40.85, -73.8667),
@@ -77,144 +91,245 @@ coordinates = [
     (43.07, -77.0), (43.1199, -77.0886), (43.0837, -77.0676),
     (41.15, -73.75), (41.0824, -73.7235), (41.1497, -73.8129),
     (42.73, -78.21), (42.6543, -78.2517), (42.7225, -78.1886),
-    (42.65, -77.1)
+    (42.65, -77.1),
 ]
 
+WEATHER_FEATURES: list[str] = [
+    "temperature_2m_max",
+    "temperature_2m_min",
+    "daylight_duration",
+    "sunshine_duration",
+    "uv_index_max",
+    "uv_index_clear_sky_max",
+    "rain_sum",
+    "showers_sum",
+    "snowfall_sum",
+    "precipitation_hours",
+    "wind_speed_10m_max",
+    "wind_gusts_10m_max",
+]
 
-# Function to fetch weather data for a single location
-def fetch_weather_data(lat, lon):
-    url = "https://archive-api.open-meteo.com/v1/archive"
+DATA_START_DATE = "2005-01-01"
+DATA_END_DATE = "2024-12-31"
+TIMEZONE = "America/New_York"
+OUTPUT_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "new-york-weather.csv")
+FAILED_COORDS_PATH = os.path.join(os.path.dirname(__file__), "..", "data", "failed_coordinates.csv")
+API_URL = "https://archive-api.open-meteo.com/v1/archive"
+
+# Rate limiting thresholds. Open-Meteo's free tier allows 5,000 requests/hour
+# and 10,000 requests/day. We pause every 3 requests to stay well under the
+# per-minute burst limit.
+REQUESTS_PER_PAUSE = 3
+PAUSE_MIN_SECONDS = 2.5
+PAUSE_MAX_SECONDS = 4.5
+MINUTELY_LIMIT_PAUSE = 65    # Slightly over 60s to clear the window
+HOURLY_LIMIT_PAUSE = 3600
+HOURLY_REQUEST_LIMIT = 5000
+DAILY_REQUEST_LIMIT = 10000
+MAX_RETRIES = 3
+
+
+# ---------------------------------------------------------------------------
+# Client setup
+# ---------------------------------------------------------------------------
+
+def _build_openmeteo_client() -> openmeteo_requests.Client:
+    """
+    Build an Open-Meteo API client with caching and retry logic.
+
+    Uses requests_cache to avoid redundant network calls during development,
+    and retry_requests to handle transient network errors automatically.
+
+    Returns:
+        Configured openmeteo_requests.Client instance.
+    """
+    cache_session = requests_cache.CachedSession(".cache", expire_after=3600)
+    retry_session = retry(cache_session, retries=5, backoff_factor=0.2)
+    return openmeteo_requests.Client(session=retry_session)
+
+
+# Build the client once at module level so all calls share the cache.
+openmeteo = _build_openmeteo_client()
+
+
+# ---------------------------------------------------------------------------
+# Data fetching
+# ---------------------------------------------------------------------------
+
+def fetch_weather_data(lat: float, lon: float) -> pd.DataFrame:
+    """
+    Fetch daily weather data for a single coordinate from the Open-Meteo Archive API.
+
+    Requests twelve daily weather variables for the full collection window
+    (DATA_START_DATE to DATA_END_DATE). Results are returned as a flat DataFrame
+    with one row per day plus latitude/longitude columns for later spatial joins.
+
+    Args:
+        lat: Latitude of the target location.
+        lon: Longitude of the target location.
+
+    Returns:
+        DataFrame with columns for date, all WEATHER_FEATURES, latitude, longitude.
+
+    Raises:
+        Exception: Propagates any API or network error to the caller, which handles
+            retries and rate-limit pauses.
+    """
     params = {
         "latitude": lat,
         "longitude": lon,
-        "start_date": "2005-01-01",
-        "end_date": "2005-12-31",
-        "daily": [
-            'temperature_2m_max','temperature_2m_min',"daylight_duration", "sunshine_duration",'uv_index_max', 'uv_index_clear_sky_max', "rain_sum", "showers_sum",
-            "snowfall_sum", "precipitation_hours", "wind_speed_10m_max", "wind_gusts_10m_max"
-        ],
-        "timezone": "America/New_York"
+        "start_date": DATA_START_DATE,
+        "end_date": DATA_END_DATE,
+        "daily": WEATHER_FEATURES,
+        "timezone": TIMEZONE,
     }
 
-    response = openmeteo.weather_api(url, params=params)[0]
-
+    response = openmeteo.weather_api(API_URL, params=params)[0]
     daily = response.Daily()
-    daily_data = {
+
+    n_values = len(daily.Variables(0).ValuesAsNumpy())
+    daily_data: dict = {
         "date": pd.date_range(
             start=pd.to_datetime(daily.Time(), unit="s", utc=True),
             end=pd.to_datetime(daily.TimeEnd(), unit="s", utc=True),
             freq=pd.Timedelta(seconds=daily.Interval()),
-            inclusive="left"
+            inclusive="left",
         ),
-        'temperature_2m_max': daily.Variables(0).ValuesAsNumpy(),
-        'temperature_2m_min': daily.Variables(1).ValuesAsNumpy(),
-        'daylight_duration': daily.Variables(2).ValuesAsNumpy(),
-        'sunshine_duration': daily.Variables(3).ValuesAsNumpy(),
-        'uv_index_max': daily.Variables(4).ValuesAsNumpy(),
-        'uv_index_clear_sky_max': daily.Variables(5).ValuesAsNumpy(),
-        'rain_sum': daily.Variables(6).ValuesAsNumpy(),
-        'showers_sum': daily.Variables(7).ValuesAsNumpy(),
-        'snowfall_sum': daily.Variables(8).ValuesAsNumpy(),
-        'precipitation_hours': daily.Variables(9).ValuesAsNumpy(),
-        'wind_speed_10m_max': daily.Variables(10).ValuesAsNumpy(),
-        'wind_gusts_10m_max': daily.Variables(11).ValuesAsNumpy(),
-        "latitude": [lat] * len(daily.Variables(0).ValuesAsNumpy()),
-        "longitude": [lon] * len(daily.Variables(0).ValuesAsNumpy()),
+        "latitude": [lat] * n_values,
+        "longitude": [lon] * n_values,
     }
+
+    for idx, feature in enumerate(WEATHER_FEATURES):
+        daily_data[feature] = daily.Variables(idx).ValuesAsNumpy()
+
     return pd.DataFrame(data=daily_data)
 
-# Main data collection function with comprehensive rate limiting and early stopping
-def collect_weather_data(coordinates, max_retries=3, daily_api_limit=10000):
-    dataframes = []
-    failed_coordinates = []
+
+# ---------------------------------------------------------------------------
+# Collection loop
+# ---------------------------------------------------------------------------
+
+def collect_weather_data(
+    coordinates: list[tuple[float, float]],
+    max_retries: int = MAX_RETRIES,
+    daily_api_limit: int = DAILY_REQUEST_LIMIT,
+) -> tuple[pd.DataFrame, list[tuple[float, float]]]:
+    """
+    Collect weather data for all coordinates with rate limiting and retry logic.
+
+    Iterates over the coordinate list, fetching data for each point. Pauses
+    every REQUESTS_PER_PAUSE calls to stay within Open-Meteo's burst limits.
+    Detects API error messages in exceptions to apply the correct pause duration
+    (minutely vs. hourly limit). Stops early if daily_api_limit is reached.
+
+    Args:
+        coordinates: List of (latitude, longitude) tuples to collect.
+        max_retries: Number of retry attempts per coordinate before marking as failed.
+        daily_api_limit: Maximum total requests before stopping collection.
+
+    Returns:
+        Tuple of (combined_dataframe, failed_coordinates) where:
+            - combined_dataframe: All successfully collected records concatenated.
+            - failed_coordinates: Coordinates that failed after all retry attempts.
+    """
+    dataframes: list[pd.DataFrame] = []
+    failed_coordinates: list[tuple[float, float]] = []
     request_count = 0
     hourly_request_count = 0
     daily_request_count = 0
-    
+
     for i, (lat, lon) in enumerate(coordinates, 1):
-        # Stop collection BEFORE making a request if daily API limit is reached
         if daily_request_count >= daily_api_limit:
-            print(f"Daily API limit of {daily_api_limit} requests reached. Stopping data collection early.")
+            print(
+                f"Daily API limit of {daily_api_limit} requests reached. "
+                "Stopping collection early."
+            )
             break
-        
+
         retries = 0
         success = False
-        
+
         while retries < max_retries and not success:
             try:
-                print(f"Fetching weather data for coordinates: {lat}, {lon} (Location {i}/{len(coordinates)}, Attempt {retries + 1})")
-                
-                # Fetch data for the current location
+                print(
+                    f"Fetching ({lat}, {lon}) — location {i}/{len(coordinates)}, "
+                    f"attempt {retries + 1}"
+                )
                 df = fetch_weather_data(lat, lon)
                 dataframes.append(df)
-                
+
                 request_count += 1
                 hourly_request_count += 1
                 daily_request_count += 1
                 success = True
-                
-                # Add delay every 3 requests
-                if request_count % 3 == 0:
-                    delay = random.uniform(2.5, 4.5)
-                    print(f"Pausing for {delay:.2f} seconds to manage request rate...")
+
+                # Pause every REQUESTS_PER_PAUSE calls to avoid burst limits.
+                if request_count % REQUESTS_PER_PAUSE == 0:
+                    delay = random.uniform(PAUSE_MIN_SECONDS, PAUSE_MAX_SECONDS)
+                    print(f"Pausing {delay:.2f}s to manage request rate...")
                     time.sleep(delay)
-                
-                # Check and pause for hourly limit
-                if hourly_request_count >= 5000:
-                    print("Hourly API request limit reached. Pausing for 3600 seconds (1 hour)...")
-                    time.sleep(3600)
+
+                # Pause for an hour if hourly limit is approached.
+                if hourly_request_count >= HOURLY_REQUEST_LIMIT:
+                    print("Hourly limit reached. Pausing 3600s...")
+                    time.sleep(HOURLY_LIMIT_PAUSE)
                     hourly_request_count = 0
-            
+
             except Exception as e:
                 error_message = str(e)
                 retries += 1
-                
-                # Check for rate limit errors
-                if 'Minutely API request limit exceeded' in error_message:
-                    print("API minutely rate limit reached. Pausing for 65 seconds...")
-                    time.sleep(65)  # Pause for slightly over a minute
-                elif 'Hourly API request limit exceeded' in error_message:
-                    print("API hourly rate limit reached. Pausing for 3600 seconds (1 hour)...")
-                    time.sleep(3600)
+
+                if "Minutely API request limit exceeded" in error_message:
+                    print("Minutely rate limit hit. Pausing 65s...")
+                    time.sleep(MINUTELY_LIMIT_PAUSE)
+                elif "Hourly API request limit exceeded" in error_message:
+                    print("Hourly rate limit hit. Pausing 3600s...")
+                    time.sleep(HOURLY_LIMIT_PAUSE)
                     hourly_request_count = 0
                 else:
-                    print(f"Error: {error_message}")
-                    print(f"Waiting 10 seconds before retrying (Attempt {retries}/{max_retries})...")
+                    print(
+                        f"Error: {error_message}. "
+                        f"Retrying in 10s (attempt {retries}/{max_retries})..."
+                    )
                     time.sleep(10)
-        
-        # If all retry attempts fail, add to failed coordinates
+
         if not success:
-            print(f"Failed to fetch data for coordinates {lat}, {lon} after {max_retries} attempts")
+            print(f"Failed after {max_retries} attempts: ({lat}, {lon})")
             failed_coordinates.append((lat, lon))
-    
-    # Print failed coordinates and request count if any
+
     if failed_coordinates:
-        print("\nFailed to fetch data for the following coordinates:")
+        print(f"\n{len(failed_coordinates)} coordinates failed:")
         for coord in failed_coordinates:
-            print(coord)
-    
+            print(f"  {coord}")
+
     print(f"Total requests made: {daily_request_count}")
-    
+
+    if not dataframes:
+        return pd.DataFrame(), failed_coordinates
+
     return pd.concat(dataframes, ignore_index=True), failed_coordinates
 
-# Collect and save data
-try:
-    # Create data directory if it doesn't exist
-    os.makedirs('../data', exist_ok=True)
-    
-    # Collect weather data
-    combined_dataframe, failed_coords = collect_weather_data(coordinates)
-    
-    # Save to CSV
-    combined_dataframe.to_csv('../data/new-york-weather.csv', mode='a', index=False)
-    
-    # Save failed coordinates to a separate file
-    if failed_coords:
-        failed_coords_df = pd.DataFrame(failed_coords, columns=['Latitude', 'Longitude'])
-        failed_coords_df.to_csv('../data/failed_coordinates.csv', index=False)
-        print(f"Saved {len(failed_coords)} failed coordinates to './data/failed_coordinates.csv'")
-    
-    print("Weather data collection completed and saved to CSV.")
 
-except Exception as e:
-    print(f"An error occurred during data collection: {e}")
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+if __name__ == "__main__":
+    try:
+        os.makedirs(os.path.dirname(OUTPUT_PATH), exist_ok=True)
+
+        combined_df, failed_coords = collect_weather_data(COORDINATES)
+
+        if not combined_df.empty:
+            combined_df.to_csv(OUTPUT_PATH, mode="a", index=False)
+            print(f"Weather data saved to {OUTPUT_PATH}")
+        else:
+            print("No data collected — output file not written.")
+
+        if failed_coords:
+            failed_df = pd.DataFrame(failed_coords, columns=["Latitude", "Longitude"])
+            failed_df.to_csv(FAILED_COORDS_PATH, index=False)
+            print(f"Failed coordinates saved to {FAILED_COORDS_PATH}")
+
+    except Exception as e:
+        print(f"Fatal error during data collection: {e}")
