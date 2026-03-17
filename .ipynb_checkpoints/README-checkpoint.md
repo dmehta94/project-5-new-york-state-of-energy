@@ -1,113 +1,188 @@
-# Project 5: New York State of Energy - Renewable Energy by 2030
+# New York State of Energy: Renewable Energy by 2030
 
-*Team: Muhammad Haseeb Anjum, Graham Haun, Melissa Marshall, Deval Mehta, Damar Shipp*
+*A group project from the General Assembly Data Science Bootcamp, January 2025*
 
-## Table of Contents
-1) [Overview](#Overview) 
-2) [Data Dictionary](<#Data Dictionary>)
-3) [Requirements](#Requirements)
-4) [Executive Summary](<#Executive Summary>)
-    1) [Purpose](<#Purpose>)
-    2) [Data Handling](<#Data Handling>)
-    3) [Analysis](#Analysis)
-    4) [Findings and Implications](<#Findings and Implications>)
-    5) [Next Steps](#Next-Steps)
+**Team:** Muhammad Haseeb Anjum · Graham Haun · Melissa Marshall · Deval Mehta · Damar Shipp
+**My role:** Technical lead and project manager — I coordinated the team's workflows, wrote the README and executive summary, independently researched and implemented the Time Series K-Means Clustering model, and troubleshot and integrated each team member's code contributions.
 
-## Overview
-According to the [New York State Energy Plan](https://energyplan.ny.gov/), the State of New York intends to reduce greenhouse gas emissions to 85% of their 1990 levels by 2050. To this end, the State must produce and maintain renewable energy infrastructure to gradually replace the existing carbon-based energy systems in place on a similar, if not accelerated, timescale. In particular, the various climatological zones of New York State are amenable to wind, solar, and hydroelectric power. In order to determine the best locations for each source of energy, we must consider a variety of factors, from typical weather to cost to land use agreements.
+---
 
-We employ k-means clustering and time-series analysis to classify the state into distinct climatological zones, so that we might simplify the process for the State Energy Planning Board to determine which land use agreements should be considered for each type of renewable energy source. We then perform a predictive time-series analysis to demonstrate that our proposed plan will continue to serve the State into the near future, in alignment with the state's benchmark goals in 2030.
+## What It Does
 
-## Data Dictionary
-We collect weather data over a 20-year period from 2005 to 2024 using the [open-meteo api](https://open-meteo.com/). Open-meteo collects daily weather data at 05:00 GMT. In addition, we've collected energy consumption data for the State of New York from [New York Independent System Operators](https://www.nyiso.com/) and population data from [New York State's public data respository](https://data.ny.gov/Government-Finance/Annual-Population-Estimates-for-New-York-State-and/krt9-ym2k/about_data).
+This project uses k-means clustering, time-series k-means clustering, and Prophet time-series forecasting to identify the optimal regions across New York State for solar and wind energy infrastructure — and then projects the State's energy consumption needs through 2030 to estimate how much capacity would be required.
 
-Daily Weather Data
-| Information | Data Type | Description | Notes |
-|---|---|---|---|
-| `date` | `string` | Date on which the data was collected. | Converted to a `datetime` object for time series analysis. |
-| `daylight_duration` | `float` | Length of time between sunrise and sunset, measured in seconds. |  |
-| `sunshine_duration` | `float` | Length of time for which the sun was visible, measured in seconds. |  |
-| `rain_sum` | `float` | Total rainfall, measured in millimeters. |  |
-| `snowfall_sum` | `float` | Total snowfall, measured in millimeters. |  |
-| `precipitation_hours` | `float` | Length of time during which precipitation occured. |  |
-| `wind_speed_10m_max` | `float` | Maximum wind speed at 10 meters above ground. |  |
-| `wind_gusts_10m_max` | `float` | Maximum wind gusts at 10 meters above ground. |  |
-| `latitude` | `float` | Latitude coordinate. |  |
-| `longitude` | `float` | Longitude coordinate. |  |
-| `precipitation_total` | `float` | Sum of `rain_sum` and `snowfall_sum`. | Engineered. |
-| `wind_speed_above_20` | `integer`| Locations with wind speeds above 20 mph. | Engineered. |
-| `frequency_above_20` | `integer` | Counting how frequently a renewable energy-related value surpassed a value of 20 post-standardization. | Engineered. |
-| `temperature_range` | `float`| The span of temperature for a location.| Engineered. |
-| `average_temperature` | `float`| Mean temperature for a location. | Engineered. |
-| `temp_daylight_interaction` | `float`| A measure of the covariance of temperature and daylight duration over a given period. | Engineered. |
-| `wind_speed_index` | `float`| A standardized metric representing wind speed conditions over a specific time period and location. | Engineered. |
-| `month` |`period(M)` | The month to which the datapoint corresponds. | Engineered. |
+We collected 20 years of daily weather data across 166 coordinate points, clustered those points into climatological zones, forecast weather trends through 2030, and overlaid projected county-level energy demand to produce a data-driven recommendation for the New York State Energy Planning Board.
 
-Energy Consumption Data
-| Information | Data Type | Description | Notes |
-|---|---|---|---|
-| `Name` | `string` | Zone for which data is collected. |  |
-| `Load` | `float` | Total energy consumption, measured in KwH. |  |
-| `Date` | `string` | Date on which the date was collected. | Converted to a `datetime` object for time series analysis. |
+---
 
-## Requirements
+## Why We Built This
 
-### Hardware
-The time-series K-Means model is parallelized on 12 threads as written. We recommend that a prospective colleague or student seeking to replicate this work either operates on a machine or server with a CPU that has **at least** 6 cores and 12 threads or modifies the `n_jobs` argument to a lower number. The latter option will increase the computation time significantly.
-### Software
-| Library | Module | Purpose |
-| --- | --- | --- |
-| `numpy` || Ease of basic aggregate operations on data.|
-| `pandas` || Read our data into a DataFrame, clean it, engineer new features, and write it out to submission files.|
-| `matplotlib` | `pyplot`| Basic plotting functionality.|
-| `seaborn` || More control over plots.|
-| `prophet` || [Procedure for forecasting time series data based on an additive model where non-linear trends are fit with yearly, weekly, and daily seasonality, plus holiday effects.](https://facebook.github.io/prophet/)|
-| `sklearn` | `cluster`| `KMeans` for KMeans clustering.|
-|  | `metrics`| `silhouette_score` for determining the silhouette score.|
-|  | `preprocessing`| `StandardScaler` for scaling data.|
-|  | `pipeline`| `Pipeline` to set up a pipeline for models.|
-|  | `decomposition`| `PCA` to reduce dimensionality of the data.|
-| `tslearn` | `clustering`| `TimeSeriesKMeans` for a KMeans model that accounts for a historic change.|
-| `zipefile` | | To extract files from a zip file.|
-| `os` | | Access operating level commands within python.|
-| `random` | | To generate random seeds for easier analysis of models.|
-| `time` | | To delay the data collection script to avoid minutely and hourly api limits.|
-| `retry_requests` | | `retry` Helps handle HTTP timeouts or network errors.|
-| `openmeteo_requests` | | Required for the open-meteo api.|
-| `requests_cache` | | cahce HTTP requests to reduce the need for repeated network calls.|
-## Executive Summary
+New York State has committed to reducing greenhouse gas emissions to 85% of 1990 levels by 2050 under the [New York State Energy Plan](https://energyplan.ny.gov/). Meeting that target requires replacing carbon-based energy infrastructure with renewable alternatives — but the State spans dramatically different climate zones, from the Great Lakes effect regions of Western NY to the coastal weather patterns of Long Island. The question isn't just *whether* to build renewable infrastructure — it's *where*, and *what kind*.
 
-### Purpose
-We require three key pieces of information in order to best inform the Energy Planning Board of the best regions to considering building solar, wind, and hydroelectric energy collection facilities and distribution centers:
+This project was our final group project at GA bootcamp, completed just before our individual capstones. Our team chose it because it was a real, open policy problem with real publicly available data, and because it required us to push beyond what the bootcamp had taught us. Neither time-series clustering nor large-scale API data collection were part of the curriculum — I had to learn both independently mid-project.
 
-- The climatological regions of New York State
-- The demand for energy across the State
-- The cost of building and maintaining said structures
+**The practical output:** A map of New York State divided into wind-favorable and solar-favorable zones, with projected energy demand curves through 2030, designed to inform where the State should prioritize building new infrastructure.
 
-To determine the climatological zones and the source of energy to which they are most amenable, we employ k-means clustering and time-series k-means clustering, both to inspect the number of zones and how those zones might change over time.
+---
 
-### Data Handling
-#### Weather Data
-We gathered daily weather data for the 20 year period spanning 2005 to 2024, across 166 distinct points from New York State from the Open-Meteo API. We discovered after-the-fact that weather data from 2011 onward was only available for a single point, but had operated under the assumption that we had more complete data.
+## What I Learned
 
-The UV data we collected was completely missing. As such, we opted to remove it. Likewise, two points were missing sunshine duration data. Given that the rows with missing data were so small relative to the overall dataset, we opted to remove these as well.
+### Technical skills
+- **Time Series K-Means Clustering with DTW:** The `tslearn` library's `TimeSeriesKMeans` with a soft-DTW metric was something I had to learn entirely from scratch. Standard k-means treats time as irrelevant; time-series k-means accounts for temporal patterns across the forecast horizon. Getting this to run on ~166 locations × 300+ months × 12+ features required careful data reshaping and understanding of how `tslearn` expects its input arrays.
+- **Prophet at scale:** I applied Meta's Prophet model to two separate problems — forecasting 12 weather features per location (weather clustering) and forecasting energy load per county (~62 counties). Writing a clean abstraction that handled both use cases without duplicating logic taught me a lot about function design under varying input shapes.
+- **API rate limiting in practice:** The Open-Meteo API has per-minute, per-hour, and per-day limits. I learned to detect rate limit errors from exception messages and apply the correct pause duration, rather than applying a blanket sleep. That distinction matters when you're making 1,000+ requests.
+- **ETL pipeline design:** Managing three separate ETL pipelines (weather collection, load data extraction, county forecasting) with intermediate files between them forced me to think carefully about data contracts — what format each script expects to receive, and what format it promises to produce.
 
-All of our data presented as "object" types in our pandas dataframe, though all of our data was numeric or a "datetime" in nature. We manually adjusted the datatypes to account for this, which is reflected in the data dictionary above. Since the weather data was collected at the same time everyday, we opted to remove the timestamp at the end of every date.
+### Data science insights
+- **Sparse data reveals itself late.** We discovered after collecting the weather data that the Open-Meteo API only returned complete multi-point data through 2010 — 2011 onward was available at only one coordinate. We hadn't caught this during our API testing phase. It's a reminder that validating data completeness should happen immediately after collection, not after you've built your entire pipeline on top of it.
+- **A three-cluster solution didn't hold.** We started with the assumption that we'd find three clusters — solar, wind, and hydro. The silhouette score for three clusters (0.29) told us otherwise. Dropping to two clusters improved the score to 0.44, and feature engineering pushed it to 0.575. Sometimes the data doesn't confirm your hypothesis, and you have to follow the numbers.
+- **Prophet's long-horizon limit is real.** The energy load projections showed consumption eventually reaching zero — physically impossible. Prophet models seasonal and trend components well over 3-5 year horizons, but it extrapolates trend linearly beyond that. Any time-series forecast extending 10+ years needs strong domain constraints to stay plausible.
 
-After checking for correlations between the native features of our dataset that remained, we engineered some additional features, which are made plain above. We also consolidated the precipitation sum into a single feature, since the distinct type of precipitation does not have an impact on the viability for solar or hydroelectric power.
+### Software engineering practices
+- **Shared constants belong in one place.** Midway through the project, two team members defined different versions of the zone-to-county mapping and the coordinate list. Consolidating these into module-level constants was a lesson I'll carry forward to every project.
+- **Global mutable state is a trap.** The original `Energy_Load_ETL.py` used a `global load_df` that accumulated data across function calls. This worked until it didn't — order-dependent side effects are hard to debug and impossible to test cleanly. I restructured it to return DataFrames and concatenate explicitly.
 
-#### Load Data
-The load data required less transformation in the same sense as the weather data. We gathered data for the energy load from NYISO by zone, then converted the zone-based data by county, accounting for the population of each county. The process to collect the load and population data required building an ETL pipeline for each one, since the data was saved in smaller chunks by non-standard denominations. You can view both pipelines within the code folder.
+### Unexpected learnings
+- **Technical lead ≠ doing everything.** I came in with strong opinions about code quality and initially wanted to rewrite everything myself. I learned instead to write clear interface contracts, let team members implement their pieces, and do targeted code review rather than wholesale replacement. That preserved everyone's ownership and kept us on schedule.
+- **Domain knowledge matters for feature selection.** The features that most improved our clustering score weren't the ones I would have guessed from the correlation matrix alone — the `wind_speed_index` and `temp_daylight_interaction` interaction features made the solar/wind split much cleaner. I had to read about what actually differentiates solar and wind viability before I understood which engineered features would be meaningful.
 
-### Analysis
-We initially intended to divide New York State into three clusters: one for each energy source we considered to be compatible with the State. A quick k-means clustering algorithm demonstrated that a hydro-electric cluster is not well-defined, thus we focus on solar and wind. With that knowledge in mind, we engineered a few features to improve the separation between clusters, which are clearly indicated above. We then project all of our features through 2030 using a Prophet model (which handles seasonality, trends, and shocks with ease) before fitting a time-series k-means clustering model to it. We see that our clusters shift as time progresses, relative to the 2020 clusters, but we should note that the Open-Meteo data is faulty on collection. As such, our analysis may need to be revisited with more complete data.
+### Design decisions
+- **Prophet over SARIMA for weather forecasting:** Prophet handles missing data, multiple seasonalities, and holiday effects without parameter tuning, which was critical when we had gaps in the weather data. SARIMA would have required careful order selection per feature per location — over a thousand models to tune. Prophet let us scale to that problem size.
+- **Two clusters instead of three:** We explicitly considered forcing a third hydro cluster but found no well-separated hydro signal in the weather data. Hydroelectric viability depends more on river geography and water flow than on the weather variables we collected, so the clustering correctly found no third natural grouping.
+- **Parallel K-Means on 12 threads:** The `TimeSeriesKMeans` model is computationally expensive with soft-DTW. We parallelized it across 12 threads (`n_jobs=12`), which requires a machine with at least 6 cores/12 threads. Users on less powerful hardware should reduce `n_jobs`.
 
-We also projected New York State's energy use through 2030 with a Prophet model. Here the data was more complete and required no feature engineering and our projected data aligns very well with historic changes. We see that the State's energy consumption drops over time, with seasonal upticks during the Summer months. We would expect energy consumption to taper at some point, however our projections show it completely vanishing, which is unrealistic. This is one of the faults with time-series analysis.
+---
 
-As the energy consumption for the State drops, the cost of energy production would as well, as some solar and wind farms can be retired. Our cost analysis is purely based on research in public-facing figures from The United States Department of Energy, the National Renewable Energy Laboratory, The International Renewable Energy Agency, and the United States Energy Information Agency. We do expect that the cost for maintaining solar and wind farms will be impacted by inflation, but not enough to offset the savings presented by the lower cost of use.
+## Quick Start
 
-### Findings and Implications
-Our present analysis suggests that New York State is in a great position to take advantage of wind and solar farms to produce and store energy to service the whole State's needs. The construction, staffing, and maintenance of these new facilities is projected to produce around 250,000 new jobs and save the State trillions in the long term, compared to the present energy infrastructure. As the effects of human-accelerated climate change become more visible, the climatological zones of New York State will muddle as well, with the "solar" zone growing larger.
+### Prerequisites
+- Python 3.10+
+- CPU with at least 6 cores / 12 threads (for Time Series K-Means; reduce `n_jobs` otherwise)
 
-### Next Steps
-Future work would confirm that our proposal accurately assesses and meets New York's energy needs through 2050 and beyond. We do caution, however, that long-term time-series projections tend to be unreliable, though there is a margin of confidence we may able to provide. The New York State Energy Planning Board should proceed to check land use agreements in accordance with our recommendations.
+### Setup
+
+```bash
+git clone https://github.com/dmehta94/project-5-new-york-state-of-energy.git
+cd project-5-new-york-state-of-energy
+
+python -m venv venv
+source venv/Scripts/activate  # Windows / GitBash
+# source venv/bin/activate    # macOS / Linux
+
+pip install -r requirements.txt
+```
+
+### Run the pipeline
+
+The pipeline has three stages that must run in order:
+
+```bash
+# 1. Collect 20 years of weather data (takes several hours — API rate limited)
+python code/Weather_Data_Collection.py
+
+# 2. Extract and compile NYISO load data (requires pre-downloaded zip archives)
+python code/Energy_Load_ETL.py
+
+# 3. Run county-level load forecasts (requires Analysis.ipynb pivoting step first)
+python code/County_Forecasting_ETL.py
+
+# 4. Run the full analysis
+jupyter notebook code/Analysis.ipynb
+```
+
+**Note:** The weather data CSV (~500MB) and load data zip archives are not included in the repository due to size. See Data Sources below for download links.
+
+---
+
+## Data Sources
+
+| Dataset | Source | Description |
+|---|---|---|
+| Daily weather data | [Open-Meteo Archive API](https://open-meteo.com/) | 12 daily variables, 166 coordinate points, 2005–2024 |
+| Energy load by zone | [NYISO](https://www.nyiso.com/load-data) | Hourly zone-level load data, 2008–2024 |
+| County population | [NY State Open Data](https://data.ny.gov/Government-Finance/Annual-Population-Estimates-for-New-York-State-and/krt9-ym2k/about_data) | Annual county population estimates |
+
+---
+
+## Technical Details
+
+### Stack
+
+| Library | Purpose |
+|---|---|
+| `prophet` | Time-series forecasting for weather features and county load |
+| `tslearn` | Time Series K-Means Clustering with soft-DTW metric |
+| `sklearn` | Standard K-Means, PCA, StandardScaler, silhouette scoring |
+| `pandas`, `numpy` | Data manipulation and feature engineering |
+| `matplotlib`, `seaborn` | Visualization |
+| `openmeteo_requests`, `requests_cache` | Open-Meteo API client with caching |
+| `zipfile`, `os` | NYISO archive extraction |
+
+### Key functions
+
+**`Weather_Data_Collection.py`**
+- `fetch_weather_data(lat, lon)` — Retrieves daily weather records for one coordinate from the Open-Meteo Archive API
+- `collect_weather_data(coordinates)` — Iterates over all 166 coordinates with rate limiting, retry logic, and partial-failure tracking
+
+**`Energy_Load_ETL.py`**
+- `unzip_all_archives(base_path, start_year, end_year)` — Extracts all NYISO zip archives from year-named subdirectories
+- `compile_data(file_name, base_path)` — Reads one NYISO CSV and aggregates to daily average load per zone
+- `compile_all_data(base_path)` — Calls `compile_data` across all extracted CSVs and concatenates results
+
+**`County_Forecasting_ETL.py`**
+- `forecast_county(data, county)` — Trains Prophet on one county's load history and forecasts through 2050
+- `run_county_forecasts(data)` — Runs the above for all ~62 counties and merges into a wide DataFrame
+- `extract_date_range(file_name, start_date, end_date)` — Filters the forecast CSV to the analysis window
+
+**`Analysis.ipynb`**
+- `preprocess_and_forecast_prophet(data, forecast_end_year)` — Aggregates weather data to monthly frequency, runs Prophet on each feature per location, returns a 3D array `(n_locations, n_months, n_features)` for time-series clustering
+- `cluster_summary(forecasted_data, clusters, feature_names)` — Computes average feature values per cluster for interpretability
+- `plot_clusters_on_map(locations_df, cluster_assignments)` — Plots cluster assignments as a geographic scatter over NY State coordinates
+
+### Coordinate selection
+We selected 166 coordinate points to cover all 62 counties, typically three points per county: the county centroid plus two secondary points. This spatial resolution gave us enough variation to identify meaningful climatological subregions without exceeding the Open-Meteo free-tier daily request limit.
+
+---
+
+## Findings
+
+New York State shows a clear two-cluster structure: a wind-favorable cluster covering essentially all of upstate NY, and a solar-favorable cluster concentrated in the southeastern corner — the NYC metro area, Long Island, and the lower Hudson Valley. The split is roughly upstate vs. downstate, with the solar cluster identified by lower latitudes (below ~42°N) and longitudes east of roughly -74.5°.
+
+The exploratory k-means model on 2020 weather data reached a silhouette score of 0.575 after feature engineering and PCA tuning. The time-series k-means model — which accounts for temporal patterns across the full forecast horizon — returned a silhouette score of 0.434, lower than the 2020 snapshot. The presentation notes this as evidence of climate-driven cluster drift over time: the boundary between wind and solar zones is shifting, with the solar zone expanding northward.
+
+Statewide energy consumption declined from roughly 19,000 MW/year in 2005 to a projected ~16,000 MW/year by 2030 — a 16% decrease — with strong seasonal peaks in winter and summer. Kings County is the top energy consumer in the state, averaging approximately 1,750 megawatts per day, followed by Queens, New York, Suffolk, and Nassau counties — all downstate. The projected forecast maintains the seasonal pattern but shows continued gradual decline.
+
+Our cost analysis (see `cost_analysis.md`) projects that solar and wind infrastructure would pay back within 6–12 years depending on technology, with federal incentives (30% ITC for solar, $25/MWh PTC for wind) accelerating returns. Long-term, the transition is projected to create 250,000+ jobs and save the State billions.
+
+---
+
+## Limitations
+
+- **Sparse post-2010 weather data:** The Open-Meteo API returned complete multi-point data only through 2010. The 2011–2024 records cover only a single coordinate. Our clustering results for the forecast period should be interpreted with this data quality issue in mind.
+- **Prophet's long-horizon extrapolation:** The energy consumption projections show demand approaching zero by 2030, which is not physically realistic. Prophet captures recent trend and seasonality well but extrapolates trend linearly over long horizons without domain constraints.
+- **No hydro cluster:** We could not identify a well-defined hydroelectric cluster from weather variables alone. Hydro viability depends primarily on river geography and water flow, not the weather features we collected.
+- **Zone-to-county population weighting:** We approximated county load by distributing zonal NYISO load data by population share. This is a reasonable proxy but doesn't account for industrial vs. residential load differences across counties.
+- **Static coordinate grid:** The 166 coordinate points were manually chosen. A more rigorous spatial sampling approach (e.g., stratified random sampling by county area) would improve representativeness.
+
+---
+
+## Credits
+
+**Team contributions:**
+- **Deval Mehta** — Technical lead, project manager, Time Series K-Means model, README and executive summary, code coordination and troubleshooting
+- **Muhammad Haseeb Anjum** — Energy load ETL pipeline, county load forecasting ETL, load data analysis and visualization
+- **Graham Haun** — Weather data collection script, initial data cleaning, exploratory k-means clustering
+- **Melissa Marshall** — EDA, feature engineering, data visualization, EDA insights slide
+- **Damar Shipp** — Cost analysis (`cost_analysis.md`), findings and implications
+
+**Instructors:** Matt Brems and Asha Mathis (General Assembly) provided guidance during the project.
+
+**AI assistance (original project):** Several team members used ChatGPT during development. I used it as a learning tool for the Time Series K-Means work: it helped me set up the initial pipeline, explained the available options in `TimeSeriesKMeans`, walked me through evaluation metric choices, clarified the difference between DTW and soft-DTW, introduced me to `pmdarima` and `tqdm`, and helped me think through automating ARIMA order selection. Muhammad used it similarly to learn Prophet for the load forecasting work. Graham used it to troubleshoot the weather data collection script. In all cases, ChatGPT was a learning and debugging aid; all analytical decisions, modeling choices, and findings are the team's own. Claude (Anthropic) assisted with post-bootcamp code cleanup, standardization, docstrings, and README writing.
+
+---
+
+## License
+
+MIT License — see `LICENSE` for details.
+
+**Contact:** Deval Mehta · [GitHub @dmehta94](https://github.com/dmehta94)
